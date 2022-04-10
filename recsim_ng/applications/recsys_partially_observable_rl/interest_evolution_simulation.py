@@ -23,6 +23,8 @@ from recsim_ng.core import variable
 from recsim_ng.lib.tensorflow import log_probability
 from recsim_ng.lib.tensorflow import runtime
 import tensorflow as tf
+import datetime
+
 
 Network = network_lib.Network
 Variable = variable.Variable
@@ -38,7 +40,8 @@ def distributed_train_step(
     global_batch,
     trainable_variables,
     metric_to_optimize='reward',
-    optimizer = None
+    optimizer = None,
+    entropy_reg = False,
 ):
   """Extracts gradient update and training variables for updating network."""
   with tf.GradientTape() as tape:
@@ -46,7 +49,8 @@ def distributed_train_step(
     last_metric_value = last_state['metrics state'].get(metric_to_optimize)
     log_prob = last_state['slate docs_log_prob_accum'].get('doc_ranks')
     objective = -tf.tensordot(tf.stop_gradient(last_metric_value), log_prob, 1)
-    objective -= 0.01 * tf.reduce_sum(log_prob * tf.math.exp(log_prob, name='Prob'))
+    if entropy_reg:
+      objective -= 0.01 * tf.reduce_sum(log_prob * tf.math.exp(log_prob, name='Prob'))
     objective /= float(global_batch)
 
   grads = tape.gradient(objective, trainable_variables)
@@ -76,7 +80,8 @@ def make_train_step(
     global_batch,
     trainable_variables,
     metric_to_optimize,
-    optimizer = None
+    optimizer = None,
+    entropy_reg = False,
 ):
   """Wraps a traced training step function for use in learning loops."""
 
@@ -84,7 +89,7 @@ def make_train_step(
   def distributed_grad_and_train():
     return distributed_train_step(tf_runtime, horizon, global_batch,
                                   trainable_variables, metric_to_optimize,
-                                  optimizer)
+                                  optimizer, entropy_reg)
 
   return distributed_grad_and_train
 
@@ -97,14 +102,24 @@ def run_simulation(
     simulation_variables,
     trainable_variables,
     metric_to_optimize = 'reward',
+    entropy_reg = False,
 ):
   """Runs simulation over multiple horizon steps while learning policy vars."""
   optimizer = reset_optimizer(learning_rate)
   tf_runtime = make_runtime(simulation_variables)
   train_step = make_train_step(tf_runtime, horizon, global_batch,
                                trainable_variables, metric_to_optimize,
-                               optimizer)
+                               optimizer, entropy_reg)
 
-  for _ in range(num_training_steps):
+  if entropy_reg:
+    log_dir = "log_dir/entropy_reg/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+  else:
+    log_dir = "log_dir/orig/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+  online_summary_writer = tf.summary.create_file_writer(log_dir)
+
+  for step in range(num_training_steps):
     _, _, reward = train_step()
+    with online_summary_writer.as_default():
+      tf.summary.scalar('reward', reward, step=step)
     print(reward)

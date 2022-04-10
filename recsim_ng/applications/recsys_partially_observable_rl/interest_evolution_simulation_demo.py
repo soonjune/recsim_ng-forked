@@ -21,6 +21,8 @@ from recsim_ng.applications.recsys_partially_observable_rl import simulation_con
 import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+# os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 
 def main(argv):
@@ -31,13 +33,14 @@ def main(argv):
           num_users=num_users))
 
   interest_evolution_simulation.run_simulation(
-      num_training_steps=100,
+      num_training_steps=1000, #100
       horizon=100,
       global_batch=num_users,
       learning_rate=1e-4,
       simulation_variables=variables,
       trainable_variables=trainable_variables,
-      metric_to_optimize='cumulative_reward')
+      metric_to_optimize='cumulative_reward',
+      entropy_reg=True)
 
 
 if __name__ == '__main__':
