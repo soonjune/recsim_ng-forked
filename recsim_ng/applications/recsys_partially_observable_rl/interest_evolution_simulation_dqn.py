@@ -24,12 +24,16 @@ from recsim_ng.lib.tensorflow import log_probability
 from recsim_ng.lib.tensorflow import runtime
 import tensorflow as tf
 
+import pdb
+from tf_agents.replay_buffers import tf_uniform_replay_buffer
+
+
 Network = network_lib.Network
 Variable = variable.Variable
 
 
 def reset_optimizer(learning_rate):
-  return tf.keras.optimizers.SGD(learning_rate)
+  return tf.keras.optimizers.Adam(learning_rate)
 
 
 def distributed_train_step(
@@ -46,7 +50,6 @@ def distributed_train_step(
     last_metric_value = last_state['metrics state'].get(metric_to_optimize)
     log_prob = last_state['slate docs_log_prob_accum'].get('doc_ranks')
     objective = -tf.tensordot(tf.stop_gradient(last_metric_value), log_prob, 1)
-    objective -= 0.01 * tf.reduce_sum(log_prob * tf.math.exp(log_prob, name='Prob'))
     objective /= float(global_batch)
 
   grads = tape.gradient(objective, trainable_variables)
@@ -54,7 +57,6 @@ def distributed_train_step(
     grads_and_vars = list(zip(grads, trainable_variables))
     optimizer.apply_gradients(grads_and_vars)
   return grads, objective, tf.reduce_mean(last_metric_value)
-
 
 def make_runtime(variables):
   """Makes simulation + policy log-prob runtime."""
@@ -100,6 +102,12 @@ def run_simulation(
 ):
   """Runs simulation over multiple horizon steps while learning policy vars."""
   optimizer = reset_optimizer(learning_rate)
+  epsilon_fn = tf.keras.optimizers.schedules.PolynomialDecay(
+    initial_learning_rate = 1.0,
+    decay_steps = 250000,
+    end_learning_rate = 0.01
+  )
+
   tf_runtime = make_runtime(simulation_variables)
   train_step = make_train_step(tf_runtime, horizon, global_batch,
                                trainable_variables, metric_to_optimize,
@@ -108,3 +116,4 @@ def run_simulation(
   for _ in range(num_training_steps):
     _, _, reward = train_step()
     print(reward)
+

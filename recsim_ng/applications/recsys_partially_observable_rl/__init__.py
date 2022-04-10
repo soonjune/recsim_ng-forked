@@ -20,3 +20,6 @@ from recsim_ng.applications.recsys_partially_observable_rl import metrics
 from recsim_ng.applications.recsys_partially_observable_rl import recommender
 from recsim_ng.applications.recsys_partially_observable_rl import simulation_config
 from recsim_ng.applications.recsys_partially_observable_rl import user
+
+# for new implementation
+import interest_evolution_simulation_dqn
