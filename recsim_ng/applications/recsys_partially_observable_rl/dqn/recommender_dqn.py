@@ -15,11 +15,12 @@
 
 # Lint as: python3
 """Recommendation agents."""
+from pty import slave_open
 import gin
 from gym import spaces
 import numpy as np
 from recsim_ng.core import value
-import selectors_dqn as selector_lib
+from recsim_ng.entities.choice_models import selectors as selector_lib
 from recsim_ng.entities.recommendation import recommender
 from recsim_ng.entities.state_models import dynamic
 from recsim_ng.entities.state_models import estimation
@@ -52,7 +53,7 @@ class DQNModel(tf.keras.Model):
 
   def __init__(self, num_users, num_docs, doc_embed_dim,
                history_length, slate_size):
-    super().__init__(name="CollabFilteringModel")
+    super().__init__(name="DQNModel")
     self._num_users = num_users
     self._history_length = history_length
     self._num_docs = num_docs
@@ -164,6 +165,13 @@ class FullSlateQRecommender(recommender.BaseRecommender):
 
     self._all_possible_slates = self._model._all_possible_slates
 
+    self._epsilon_fn = tf.keras.optimizers.schedules.PolynomialDecay(
+    initial_learning_rate = 1.0,
+    decay_steps = 100, #250000
+    end_learning_rate = 0.01
+    )
+    self.step = 0
+    
     # changed as argmax selector
     # self._document_sampler = selector_lib.IteratedMultinomialLogitChoiceModel(
     #     self._slate_size, (self._num_users,),
@@ -211,13 +219,21 @@ class FullSlateQRecommender(recommender.BaseRecommender):
     del user_obs
     ctime_history = previous_state.get("ctime_history").get("state")
     docid_history = previous_state.get("doc_history").get("state")
-    qvals = self._model(docid_history, ctime_history)
-    slate_indices = tf.math.argmax(qvals, axis=1)
+    epsilon = self._epsilon_fn(self.step)
+    self.step += 1
+
+    if np.random.rand() < epsilon:
+        slate_indices = [np.random.randint(0, len(self._all_possible_slates))]
+        slate_indices = tf.expand_dims([np.random.randint(0, len(self._all_possible_slates)) for _ in range(ctime_history.shape[0])], axis=-1)
+        import pdb; pdb.set_trace()
+    else:
+        qvals = self._model(docid_history, ctime_history)
+        slate_indices = tf.expand_dims(tf.math.argmax(qvals, axis=1), axis=-1)
     doc_indices = np.asarray([self._all_possible_slates[int(i)] for i in slate_indices])
     doc_indices = tf.convert_to_tensor(doc_indices)
     slate = available_docs.map(lambda field: tf.gather(field, doc_indices))
-    import pdb; pdb.set_trace()
-    return slate.union(Value(doc_ranks=doc_indices, slate_indices=slate_indices))
+
+    return slate.union(Value(doc_ranks=doc_indices, slate_ids=slate_indices))
 
   def specs(self):
     state_spec = self._doc_history.specs().prefixed_with("doc_history").union(
@@ -254,9 +270,9 @@ class FullSlateQRecommender(recommender.BaseRecommender):
             spaces.Box(
                 low=np.zeros((self._num_users, self._slate_size)),
                 high=np.ones((self._num_users, self._slate_size)) * np.Inf)),
-        slate_indices=Space(
+        slate_ids=Space(
             spaces.Box(
-                low=np.zeros((self._num_users)),
-                high=np.ones((self._num_users)) * len(self._all_possible_slates))))
+                low=np.zeros((self._num_users, 1)),
+                high=np.ones((self._num_users, 1)) * len(self._all_possible_slates))))
     return state_spec.prefixed_with("state").union(
         slate_docs_spec.prefixed_with("slate"))

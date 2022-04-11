@@ -32,32 +32,45 @@ Variable = variable.Variable
 
 tf.config.run_functions_eagerly(True) # for debugging
 
+initial_collect_steps = 100  # @param {type:"integer"}
+replay_buffer_max_length = 100000  # @param {type:"integer"}
+batch_size = 64  # @param {type:"integer"}
+train_step_counter = tf.Variable(0)
+
+
+
 def reset_optimizer(learning_rate):
   return tf.keras.optimizers.Adam(learning_rate)
 
 
 def distributed_train_step(
     tf_runtime,
-    horizon,
+    episode_length,
     global_batch,
     trainable_variables,
     metric_to_optimize='reward',
-    optimizer = None
+    optimizer = None,
+    model=None,
 ):
   """Extracts gradient update and training variables for updating network."""
   with tf.GradientTape() as tape:
-    last_state = tf_runtime.execute(num_steps=horizon - 1)
-    last_metric_value = last_state['metrics state'].get(metric_to_optimize)
-    log_prob = last_state['slate docs_log_prob_accum'].get('doc_ranks')
-    import pdb; pdb.set_trace()
-    objective = -tf.tensordot(tf.stop_gradient(last_metric_value), log_prob, 1)
-    objective /= float(global_batch)
+    for i in range(episode_length):
+      last_state = tf_runtime.execute(0)
+      ctime_history = last_state['recommender state'].get('ctime_history').get('state')
+      docid_history = last_state['recommender state'].get('doc_history').get('state')
+      action = last_state['slate docs'].get('slate_ids')
+      last_state = tf_runtime.execute(1)
+      last_metric_value = last_state['metrics state'].get(metric_to_optimize)
+  #     import pdb; pdb.set_trace()
+  #     log_prob = last_state['slate docs_log_prob_accum'].get('doc_ranks')
+  #     objective = -tf.tensordot(tf.stop_gradient(last_metric_value), log_prob, 1)
+  #     objective /= float(global_batch)
 
-  grads = tape.gradient(objective, trainable_variables)
-  if optimizer:
-    grads_and_vars = list(zip(grads, trainable_variables))
-    optimizer.apply_gradients(grads_and_vars)
-  return grads, objective, tf.reduce_mean(last_metric_value)
+  # grads = tape.gradient(objective, trainable_variables)
+  # if optimizer:
+  #   grads_and_vars = list(zip(grads, trainable_variables))
+    # optimizer.apply_gradients(grads_and_vars)
+  return action, action, tf.reduce_mean(last_metric_value)
 
 def make_runtime(variables):
   """Makes simulation + policy log-prob runtime."""
@@ -79,7 +92,8 @@ def make_train_step(
     global_batch,
     trainable_variables,
     metric_to_optimize,
-    optimizer = None
+    optimizer = None,
+    model=None
 ):
   """Wraps a traced training step function for use in learning loops."""
 
@@ -87,7 +101,7 @@ def make_train_step(
   def distributed_grad_and_train():
     return distributed_train_step(tf_runtime, horizon, global_batch,
                                   trainable_variables, metric_to_optimize,
-                                  optimizer)
+                                  optimizer, model)
 
   return distributed_grad_and_train
 
@@ -100,19 +114,14 @@ def run_simulation(
     simulation_variables,
     trainable_variables,
     metric_to_optimize = 'reward',
+    model=None,
 ):
   """Runs simulation over multiple horizon steps while learning policy vars."""
   optimizer = reset_optimizer(learning_rate)
-  epsilon_fn = tf.keras.optimizers.schedules.PolynomialDecay(
-    initial_learning_rate = 1.0,
-    decay_steps = 250000,
-    end_learning_rate = 0.01
-  )
-
   tf_runtime = make_runtime(simulation_variables)
   train_step = make_train_step(tf_runtime, horizon, global_batch,
                                trainable_variables, metric_to_optimize,
-                               optimizer)
+                               optimizer, model)
 
   for _ in range(num_training_steps):
     _, _, reward = train_step()

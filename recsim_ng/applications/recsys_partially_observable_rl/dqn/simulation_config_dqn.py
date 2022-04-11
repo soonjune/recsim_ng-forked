@@ -25,14 +25,14 @@ import recommender_dqn
 from recsim_ng.applications.recsys_partially_observable_rl import user
 from recsim_ng.core import variable
 from recsim_ng.lib.tensorflow import entity
-from recsim_ng.stories import recommendation_simulation as simulation
+import recommendation_simulation as simulation
 
 Variable = variable.Variable
 
 
 @gin.configurable
 def create_interest_evolution_simulation_network(
-    num_users = 1, #1000
+    num_users = 2, #1000
     num_topics = 2,
     num_docs = 10, #100
     freeze_corpus = True,

@@ -28,18 +28,19 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 def main(argv):
   del argv
   num_users = 2 #1000
-  variables, trainable_variables = (
+  (variables, model), trainable_variables = (
       simulation_config_dqn.create_interest_evolution_simulation_network(
           num_users=num_users))
 
   interest_evolution_simulation_dqn.run_simulation(
       num_training_steps=100, #100
-      horizon=100,
+      horizon=15,
       global_batch=num_users,
       learning_rate=1e-4,
       simulation_variables=variables,
       trainable_variables=trainable_variables,
-      metric_to_optimize='cumulative_reward',)
+      metric_to_optimize='cumulative_reward',
+      model=model)
 
 
 if __name__ == '__main__':
