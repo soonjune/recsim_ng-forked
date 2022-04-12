@@ -25,6 +25,7 @@ from recsim_ng.lib.tensorflow import runtime
 import tensorflow as tf
 import datetime
 
+tf.config.run_functions_eagerly(True) # for debugging
 
 Network = network_lib.Network
 Variable = variable.Variable
@@ -49,6 +50,7 @@ def distributed_train_step(
     last_metric_value = last_state['metrics state'].get(metric_to_optimize)
     log_prob = last_state['slate docs_log_prob_accum'].get('doc_ranks')
     objective = -tf.tensordot(tf.stop_gradient(last_metric_value), log_prob, 1)
+    import pdb; pdb.set_trace()
     if entropy_reg:
       objective -= 0.01 * tf.reduce_sum(log_prob * tf.math.exp(log_prob, name='Prob'))
     objective /= float(global_batch)

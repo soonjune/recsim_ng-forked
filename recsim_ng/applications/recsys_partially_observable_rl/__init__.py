@@ -22,4 +22,4 @@ from recsim_ng.applications.recsys_partially_observable_rl import simulation_con
 from recsim_ng.applications.recsys_partially_observable_rl import user
 
 # for new implementation
-import interest_evolution_simulation_dqn
+# import interest_evolution_simulation_dqn

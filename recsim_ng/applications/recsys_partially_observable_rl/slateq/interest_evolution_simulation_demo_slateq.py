@@ -16,29 +16,30 @@
 # Lint as: python3
 """Train a recommender with the interest_evolution_simulation."""
 from absl import app
-from recsim_ng.applications.recsys_partially_observable_rl import simulation_config
+import interest_evolution_simulation_slateq
+import simulation_config_dqn
 import os
 
-import recsim_ng.applications.recsys_partially_observable_rl.interest_evolution_simulation_dqn as interest_evolution_simulation_dqn
-
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+# os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 
 def main(argv):
   del argv
   num_users = 1000
   variables, trainable_variables = (
-      simulation_config.create_interest_evolution_simulation_network(
+      simulation_config_dqn.create_interest_evolution_simulation_network(
           num_users=num_users))
 
-  interest_evolution_simulation_dqn.run_simulation(
-      num_training_steps=100,
+  interest_evolution_simulation_slateq.run_simulation(
+      num_training_steps=100, #100
       horizon=100,
       global_batch=num_users,
       learning_rate=1e-4,
       simulation_variables=variables,
       trainable_variables=trainable_variables,
-      metric_to_optimize='reward')
+      metric_to_optimize='cumulative_reward',)
 
 
 if __name__ == '__main__':

@@ -24,7 +24,6 @@ from recsim_ng.lib.tensorflow import log_probability
 from recsim_ng.lib.tensorflow import runtime
 import tensorflow as tf
 
-import pdb
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 
 

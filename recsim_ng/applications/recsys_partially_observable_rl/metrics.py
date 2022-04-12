@@ -44,10 +44,12 @@ class ConsumedTimeAsRewardMetrics(metrics.RecsMetricsBase):
     del corpus_state, user_state, slate_doc
     # consumed_time will be -1 for unclicked slates.
     reward = tf.clip_by_value(user_response.get("consumed_time"), 0.0, np.Inf)
+    discount_rate = 0.99
     return Value(
         reward=ed.Deterministic(loc=reward),
         cumulative_reward=ed.Deterministic(
-            loc=previous_metrics.get("cumulative_reward") + reward))
+            loc=previous_metrics.get("cumulative_reward")
+             + reward)) # discount_rate=0.99
 
   def specs(self):
     return ValueSpec(

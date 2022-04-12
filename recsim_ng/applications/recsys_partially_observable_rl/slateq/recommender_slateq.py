@@ -58,18 +58,38 @@ class DQNModel(tf.keras.Model):
     self._doc_embed_dim = doc_embed_dim
     self._slate_size = slate_size
 
+    #embedding layers
+    self._doc_proposal_embeddings = tf.keras.layers.Embedding(
+        num_docs + 1,
+        doc_embed_dim,
+        embeddings_initializer=tf.compat.v1.truncated_normal_initializer(),
+        mask_zero=True,
+        name="doc_prop_embedding")
+    self._doc_embeddings = tf.keras.layers.Embedding(
+        num_docs + 1,
+        doc_embed_dim,
+        embeddings_initializer=tf.compat.v1.truncated_normal_initializer(),
+        mask_zero=True,
+        name="doc_embedding")
+
+    self._user_embeddings = tf.keras.Sequential(name="recs")
+    self._user_embeddings.add(tf.keras.layers.Dense(32))
+    self._user_embeddings.add(tf.keras.layers.LeakyReLU())
+    self._user_embeddings.add(
+        tf.keras.layers.Dense(self._doc_embed_dim, name="hist_emb_layer"))
+
+
     self._all_possible_slates = [
         x for x in itertools.permutations(
-            range(num_docs+1), (num_docs+1)*slate_size)
+            range(num_docs), slate_size)
     ]
     num_actions = len(self._all_possible_slates)
     self._env_action_space = spaces.Discrete(num_actions)
 
-
-    fc_layer_params = (100, 50)
+    fc_layer_params = (doc_embed_dim*(slate_size+1), 32)
     dense_layers = [dense_layer(num_units) for num_units in fc_layer_params]
     q_values_layer = tf.keras.layers.Dense(
-        num_docs + 1,
+        num_docs,
         activation=None,
         kernel_initializer=tf.keras.initializers.RandomUniform(
             minval=-0.03, maxval=0.03),
@@ -95,9 +115,21 @@ class DQNModel(tf.keras.Model):
     # [num_docs, embed_dim + 1]
     doc_features = self._doc_proposal_embeddings(
         tf.range(1, self._num_docs + 1, dtype=tf.int32))
+    
+    q_vals = []
+    for slate in self._all_possible_slates:
+        for i in range(user_embeddings.shape[0]):
+            user = user_embeddings[i]
+            docs = []
+            for j in slate:
+                docs.append(doc_features[j])
+            docs.insert(0, user)
+            q_vals.append(self._net(tf.expand_dims(tf.concat(docs, axis=-1), axis=0)))
+    
+    import pdb; pdb.set_trace()
+
     scores = tf.einsum("ik, jk->ij", user_embeddings, doc_features)
     return scores
-
 
 @gin.configurable
 class FullSlateQRecommender(recommender.BaseRecommender):

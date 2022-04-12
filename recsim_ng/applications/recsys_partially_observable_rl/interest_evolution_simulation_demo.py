@@ -17,12 +17,12 @@
 """Train a recommender with the interest_evolution_simulation."""
 from absl import app
 import interest_evolution_simulation
-from recsim_ng.applications.recsys_partially_observable_rl import simulation_config
+import simulation_config
 import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-# os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 
 def main(argv):
@@ -33,14 +33,14 @@ def main(argv):
           num_users=num_users))
 
   interest_evolution_simulation.run_simulation(
-      num_training_steps=1000, #100
+      num_training_steps=100, #100
       horizon=100,
       global_batch=num_users,
       learning_rate=1e-4,
       simulation_variables=variables,
       trainable_variables=trainable_variables,
       metric_to_optimize='cumulative_reward',
-      entropy_reg=True)
+      entropy_reg=False)
 
 
 if __name__ == '__main__':

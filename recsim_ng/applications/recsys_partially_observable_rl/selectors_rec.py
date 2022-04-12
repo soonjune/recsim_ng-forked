@@ -205,7 +205,6 @@ class IteratedMultinomialLogitChoiceModel(ChoiceModel):
 
     joint = tfd.JointDistributionCoroutine(
         lambda: sampling_fn(slate_document_logits0))
-    import pdb; pdb.set_trace()
     return Value(choice=ed.Blockwise(joint))
 
   def specs(self):

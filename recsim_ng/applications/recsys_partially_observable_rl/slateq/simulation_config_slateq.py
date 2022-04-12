@@ -21,7 +21,7 @@ from typing import Collection
 import gin
 from recsim_ng.applications.recsys_partially_observable_rl import corpus
 from recsim_ng.applications.recsys_partially_observable_rl import metrics
-import recommender
+import recommender_dqn
 from recsim_ng.applications.recsys_partially_observable_rl import user
 from recsim_ng.core import variable
 from recsim_ng.lib.tensorflow import entity
@@ -32,9 +32,9 @@ Variable = variable.Variable
 
 @gin.configurable
 def create_interest_evolution_simulation_network(
-    num_users = 1000,
+    num_users = 1, #1000
     num_topics = 2,
-    num_docs = 100,
+    num_docs = 10, #100
     freeze_corpus = True,
     history_length = 15,
 ):
@@ -59,7 +59,7 @@ def create_interest_evolution_simulation_network(
     corpus_ctor = corpus.CorpusWithTopicAndQuality
   var_fn = lambda: simulation.recs_story(  # pylint: disable=g-long-lambda
       config, user.InterestEvolutionUser, corpus_ctor,
-      functools.partial(recommender.CollabFilteringRecommender), metrics.
+      functools.partial(recommender_dqn.FullSlateQRecommender), metrics.
       ConsumedTimeAsRewardMetrics)
   simulation_vars, trainable_vars = entity.story_with_trainable_variables(
       var_fn)

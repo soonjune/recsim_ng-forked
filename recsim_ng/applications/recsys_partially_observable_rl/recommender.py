@@ -19,7 +19,7 @@ import gin
 from gym import spaces
 import numpy as np
 from recsim_ng.core import value
-from recsim_ng.entities.choice_models import selectors as selector_lib
+import selectors_rec as selector_lib
 from recsim_ng.entities.recommendation import recommender
 from recsim_ng.entities.state_models import dynamic
 from recsim_ng.entities.state_models import estimation
