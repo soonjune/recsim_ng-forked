@@ -32,9 +32,9 @@ Variable = variable.Variable
 
 @gin.configurable
 def create_interest_evolution_simulation_network(
-    num_users = 1000,
+    num_users = 2,
     num_topics = 2,
-    num_docs = 100,
+    num_docs = 10, #100
     freeze_corpus = True,
     history_length = 15,
 ):

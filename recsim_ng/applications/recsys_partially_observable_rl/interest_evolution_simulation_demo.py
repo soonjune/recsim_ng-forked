@@ -27,7 +27,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 def main(argv):
   del argv
-  num_users = 1000
+  num_users = 2 # 1000
   variables, trainable_variables = (
       simulation_config.create_interest_evolution_simulation_network(
           num_users=num_users))

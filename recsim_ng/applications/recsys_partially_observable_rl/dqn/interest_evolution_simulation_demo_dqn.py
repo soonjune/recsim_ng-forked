@@ -21,26 +21,37 @@ import simulation_config_dqn
 import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-# os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
 
 def main(argv):
   del argv
   num_users = 2 #1000
-  (variables, model), trainable_variables = (
+
+  train_info = dict()
+  train_info['timestep'] = 0
+  train_info['gamma'] = 0.99
+  train_info['batch_size'] = 32
+  train_info['update_period'] = 4 #4
+  train_info['target_update_period'] = 200 #4000
+  train_info['start_update'] = 1000 #1000
+  train_info['history_length'] = 15
+
+  (variables, rec), trainable_variables = (
       simulation_config_dqn.create_interest_evolution_simulation_network(
-          num_users=num_users))
+          num_users=num_users, history_length=train_info['history_length']))
 
   interest_evolution_simulation_dqn.run_simulation(
       num_training_steps=100, #100
-      horizon=15,
+      horizon=100,
       global_batch=num_users,
       learning_rate=1e-4,
       simulation_variables=variables,
       trainable_variables=trainable_variables,
-      metric_to_optimize='cumulative_reward',
-      model=model)
+      metric_to_optimize='reward',
+      rec=rec,
+      train_info=train_info)
 
 
 if __name__ == '__main__':

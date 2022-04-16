@@ -120,7 +120,7 @@ def recs_story(
       recommender_state, metrics_state, user_observation
   ]
 
-  return variables, recommender._model
+  return variables, recommender
 
 
 def simplified_recs_story(
