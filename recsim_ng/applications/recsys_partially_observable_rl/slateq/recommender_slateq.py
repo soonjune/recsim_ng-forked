@@ -15,6 +15,7 @@
 
 # Lint as: python3
 """Recommendation agents."""
+from pty import slave_open
 import gin
 from gym import spaces
 import numpy as np
@@ -30,6 +31,7 @@ import tensorflow_probability as tfp
 from tf_agents.agents.dqn import dqn_agent
 from tf_agents.networks import sequential
 import itertools
+import edward2 as ed
 
 
 tfd = tfp.distributions
@@ -51,7 +53,7 @@ class DQNModel(tf.keras.Model):
 
   def __init__(self, num_users, num_docs, doc_embed_dim,
                history_length, slate_size):
-    super().__init__(name="CollabFilteringModel")
+    super().__init__(name="DQNModel")
     self._num_users = num_users
     self._history_length = history_length
     self._num_docs = num_docs
@@ -78,18 +80,10 @@ class DQNModel(tf.keras.Model):
     self._user_embeddings.add(
         tf.keras.layers.Dense(self._doc_embed_dim, name="hist_emb_layer"))
 
-
-    self._all_possible_slates = [
-        x for x in itertools.permutations(
-            range(num_docs), slate_size)
-    ]
-    num_actions = len(self._all_possible_slates)
-    self._env_action_space = spaces.Discrete(num_actions)
-
-    fc_layer_params = (doc_embed_dim*(slate_size+1), 32)
+    fc_layer_params = (doc_embed_dim*2, 32)
     dense_layers = [dense_layer(num_units) for num_units in fc_layer_params]
     q_values_layer = tf.keras.layers.Dense(
-        num_docs,
+        1,
         activation=None,
         kernel_initializer=tf.keras.initializers.RandomUniform(
             minval=-0.03, maxval=0.03),
@@ -99,7 +93,7 @@ class DQNModel(tf.keras.Model):
 
 
   def call(self, doc_id_history,
-           c_time_history):
+           c_time_history, batch_size=None, actions=None):
     # Map doc id to embedding.
     # [num_users, history_length, embed_dim]
     doc_history_embeddings = self._doc_embeddings(doc_id_history)
@@ -108,7 +102,10 @@ class DQNModel(tf.keras.Model):
     user_features = tf.concat(
         (doc_history_embeddings, c_time_history[Ellipsis, np.newaxis]), axis=-1)
     # Flatten and run through network to encode history.
-    user_features = tf.reshape(user_features, (self._num_users, -1))
+    if batch_size or actions:
+      user_features = tf.reshape(user_features, (batch_size, self._num_users, -1))
+    else:
+      user_features = tf.reshape(user_features, (self._num_users, -1))
     user_embeddings = self._user_embeddings(user_features)
     # Score is found using user and document features
     # history.
@@ -117,22 +114,47 @@ class DQNModel(tf.keras.Model):
         tf.range(1, self._num_docs + 1, dtype=tf.int32))
     
     q_vals = []
-    for slate in self._all_possible_slates:
-        for i in range(user_embeddings.shape[0]):
-            user = user_embeddings[i]
-            docs = []
-            for j in slate:
-                docs.append(doc_features[j])
-            docs.insert(0, user)
-            q_vals.append(self._net(tf.expand_dims(tf.concat(docs, axis=-1), axis=0)))
-    
-    import pdb; pdb.set_trace()
+    if batch_size and actions is None:
+        for b in range(batch_size):
+            batch_result = []
+            for i in range(user_embeddings.shape[1]):
+                user = user_embeddings[b][i]
+                states = []
+                for slate in self._all_possible_slates:
+                    docs = [user]
+                    for j in slate:
+                        docs.append(doc_features[j])
+                    states.append(tf.expand_dims(tf.concat(docs, axis=-1), axis=0))
+                batch_result.append(tf.reshape(self._net(tf.concat(states, axis=0))[0], [1, -1]))
+            q_vals.append(batch_result)
+    elif actions is not None:
+        doc_actions = tf.gather_nd(self._all_possible_slates, actions)
+        for b in range(batch_size):
+            batch_result = []
+            for i in range(user_embeddings.shape[1]):
+                states = []
+                user = user_embeddings[b][i]
+                slate = doc_actions[b][i]
+                docs = [user]
+                for j in slate:
+                    docs.append(doc_features[j])
+                states.append(tf.expand_dims(tf.concat(docs, axis=-1), axis=0))
+                batch_result.append(self._net(tf.concat(states, axis=0))[0])
+            q_vals.append(batch_result)
 
-    scores = tf.einsum("ik, jk->ij", user_embeddings, doc_features)
-    return scores
+    else:
+        for i in range(self._num_docs):
+            doc = tf.expand_dims(doc_features[i], axis=0)
+            doc = tf.repeat(doc, [self._num_users], axis=0)
+            x = tf.concat((user_embeddings, doc), axis=1)
+            q_vals.append(self._net(x)[0])
+
+        return tf.squeeze(tf.stack(q_vals, axis=1))
+
+    return result
 
 @gin.configurable
-class FullSlateQRecommender(recommender.BaseRecommender):
+class SlateQRecommender(recommender.BaseRecommender):
   """A recommender agent implements full slate Q-learning based on DQN agent."""
 
   def __init__(self,
@@ -145,6 +167,8 @@ class FullSlateQRecommender(recommender.BaseRecommender):
     self._num_topics = config.get("num_topics")
     self._slate_size = config.get("slate_size")
     self._model = model_ctor(self._num_users, self._num_docs, 32,
+                             self._history_length, self._slate_size)
+    self._target = model_ctor(self._num_users, self._num_docs, 32,
                              self._history_length, self._slate_size)
     doc_history_model = estimation.FiniteHistoryStateModel(
         history_length=self._history_length,
@@ -160,13 +184,23 @@ class FullSlateQRecommender(recommender.BaseRecommender):
         dtype=tf.float32)
     self._ctime_history = dynamic.NoOPOrContinueStateModel(
         ctime_history_model, batch_ndims=1)
-    self._document_sampler = selector_lib.IteratedMultinomialLogitChoiceModel(
-        self._slate_size, (self._num_users,),
-        -np.Inf * tf.ones(self._num_users))
+
+    self._epsilon_fn = tf.keras.optimizers.schedules.PolynomialDecay(
+    initial_learning_rate = 1.0,
+    decay_steps = 10000 * 2, #250000
+    end_learning_rate = 0.01
+    )
+    self.total_calls = 0
+    
+    # changed as argmax selector
+    # self._document_sampler = selector_lib.IteratedMultinomialLogitChoiceModel(
+    #     self._slate_size, (self._num_users,),
+    #     -np.Inf * tf.ones(self._num_users))
     # Call model to create weights
     ctime_history = self._ctime_history.initial_state().get("state")
     docid_history = self._doc_history.initial_state().get("state")
     self._model(docid_history, ctime_history)
+    self._target(docid_history, ctime_history)
 
   def initial_state(self):
     """The initial state value."""
@@ -206,10 +240,20 @@ class FullSlateQRecommender(recommender.BaseRecommender):
     del user_obs
     ctime_history = previous_state.get("ctime_history").get("state")
     docid_history = previous_state.get("doc_history").get("state")
-    scores = self._model(docid_history, ctime_history)
-    doc_indices = self._document_sampler.choice(scores).get("choice")
+    epsilon = self._epsilon_fn(self.total_calls)
+    self.total_calls += 1
+
+    if np.random.rand() < epsilon:
+        slate_indices = [np.random.randint(0, len(self._all_possible_slates))]
+        slate_indices = tf.expand_dims([np.random.randint(0, len(self._all_possible_slates)) for _ in range(ctime_history.shape[0])], axis=-1)
+    else:
+        qvals = self._model(docid_history, ctime_history)
+        slate_indices = tf.expand_dims(tf.math.argmax(qvals, axis=1, output_type=tf.dtypes.int32), axis=-1)
+    doc_indices = np.asarray([self._all_possible_slates[int(i)] for i in slate_indices])
+    doc_indices = tf.convert_to_tensor(doc_indices)
     slate = available_docs.map(lambda field: tf.gather(field, doc_indices))
-    return slate.union(Value(doc_ranks=doc_indices))
+
+    return slate.union(Value(doc_ranks=doc_indices, slate_ids=slate_indices))
 
   def specs(self):
     state_spec = self._doc_history.specs().prefixed_with("doc_history").union(
@@ -245,6 +289,10 @@ class FullSlateQRecommender(recommender.BaseRecommender):
         doc_length=Space(
             spaces.Box(
                 low=np.zeros((self._num_users, self._slate_size)),
-                high=np.ones((self._num_users, self._slate_size)) * np.Inf)))
+                high=np.ones((self._num_users, self._slate_size)) * np.Inf)),
+        slate_ids=Space(
+            spaces.Box(
+                low=np.zeros((self._num_users, 1)),
+                high=np.ones((self._num_users, 1)) * len(self._all_possible_slates))))
     return state_spec.prefixed_with("state").union(
         slate_docs_spec.prefixed_with("slate"))
