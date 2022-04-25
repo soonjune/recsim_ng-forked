@@ -21,9 +21,9 @@ import gin
 from gym import spaces
 import numpy as np
 from recsim_ng.core import value
-from recsim_ng.entities.choice_models import affinities as affinity_lib
-from recsim_ng.entities.choice_models import selectors as selector_lib
-import user
+import affinities_dqn as affinity_lib
+import selectors_dqn as selector_lib
+from recsim_ng.entities.recommendation import user
 from recsim_ng.entities.state_models import dynamic
 from recsim_ng.entities.state_models import state
 from recsim_ng.lib.tensorflow import field_spec
@@ -104,7 +104,6 @@ class InterestEvolutionUser(user.User):
     # Calculate utilities.
     user_interests = previous_state.get('interest.state')
     doc_features = chosen_doc_features.get('doc_features')
-    import pdb; pdb.set_trace()
     # User interests are increased/decreased towards the consumed document's
     # topic proportinal to the document quality.
     direction = tf.expand_dims(
@@ -133,7 +132,6 @@ class InterestEvolutionUser(user.User):
     affinities = self._affinity_model.affinities(
         previous_state.get('interest.state'),
         slate_docs.get('doc_features')).get('affinities')
-    import pdb; pdb.set_trace()
     choice = self._choice_model.choice(affinities + 2.0)
     chosen_doc_idx = choice.get('choice')
     # Calculate consumption time. Negative quality documents generate more
@@ -141,7 +139,6 @@ class InterestEvolutionUser(user.User):
     doc_quality = slate_docs.get('doc_quality')
     consumed_fraction = tf.sigmoid(-doc_quality)
     doc_length = slate_docs.get('doc_length')
-    import pdb; pdb.set_trace()
     consumed_time = consumed_fraction * doc_length
     chosen_doc_responses = selector_lib.get_chosen(
         Value(consumed_time=consumed_time), chosen_doc_idx)

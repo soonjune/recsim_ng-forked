@@ -65,6 +65,7 @@ class CollabFilteringModel(tf.keras.Model):
            c_time_history):
     # Map doc id to embedding.
     # [num_users, history_length, embed_dim]
+    import pdb; pdb.set_trace()
     doc_history_embeddings = self._doc_embeddings(doc_id_history)
     # Append consumed time to representation.
     # [num_users, history_length, embed_dim + 1]

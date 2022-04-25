@@ -34,7 +34,7 @@ class InterestEvolutionUserTest(tf.test.TestCase):
     self._num_topics = 5
     self._slate_size = 1
     self._interest_step_size = 0.1
-    self._no_click_mass = -np.Inf
+    self._no_click_mass = np.Inf
     self._config = {
         'num_users': self._num_users,
         'num_topics': self._num_topics,
@@ -104,6 +104,7 @@ class InterestEvolutionUserTest(tf.test.TestCase):
             loc=[[.1, .1, .1, .1, .1], [.2, .2, .2, .2, .2],
                  [0., 0., 0., 0., 0.], [.4, .4, .4, .4, .4],
                  [.5, .5, .5, .5, .5]])).prefixed_with('interest')
+    import pdb; pdb.set_trace()
     response = self.evaluate(
         self._user.next_response(user_state, slate_docs).as_dict)
     self.assertAllClose(

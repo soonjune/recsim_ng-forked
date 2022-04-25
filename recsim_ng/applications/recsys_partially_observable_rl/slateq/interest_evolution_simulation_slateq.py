@@ -124,7 +124,6 @@ def distributed_train_step(
         target_qs = rec._target(b_next_docid_history, b_next_ctime_history, batch_size=train_info['batch_size'])
         max_q = tf.math.reduce_max(target_qs, axis=-1, keepdims=True)
         target = tf.reshape(b_reward, (train_info['batch_size'], global_batch, -1)) + train_info['gamma'] * max_q
-        
         qs = tf.reshape(rec._model(b_docid_history, b_ctime_history, batch_size=train_info['batch_size'], actions=b_action), (train_info['batch_size'], global_batch, 1))
         loss = tf.reduce_mean(tf.square(qs-target))
 
