@@ -28,7 +28,6 @@ from recsim_ng.lib.tensorflow import field_spec
 import tensorflow as tf
 import tensorflow_probability as tfp
 # for dqn
-from tf_agents.agents.dqn import dqn_agent
 from tf_agents.networks import sequential
 import itertools
 import edward2 as ed
@@ -136,9 +135,11 @@ class DQNModel(tf.keras.Model):
         tf.range(1, self._num_docs + 1, dtype=tf.int32))
 
     # predict user choice
-    prob_scores = tf.einsum("ik, jk->ij", user_embeddings, doc_features)
-    all_scores = tf.pad(prob_scores, [[0,0], [0,1]], mode='CONSTANT') # no click has score 0
-    all_prob = tf.nn.softmax(all_scores, axis=1)
+    cf_scores = tf.einsum("ik, jk->ij", user_embeddings, doc_features)
+    unnormalized_scores = tf.math.exp(cf_scores)
+
+    # all_scores = tf.pad(prob_scores, [[0,0], [0,1]], mode='CONSTANT') # no click has score 1
+    # all_prob = tf.nn.softmax(all_scores, axis=1)
     
     q_vals = []
     # calculate q values
@@ -156,7 +157,12 @@ class DQNModel(tf.keras.Model):
             q_vals.append(self._net(x)[0])
 
     qs = tf.squeeze(tf.stack(q_vals, axis=1))
-    slate_q_values = tf.gather(all_prob[:,:self._num_docs] * qs, self.slates, axis=1)
+    slate_q_values = tf.gather(unnormalized_scores * qs, self.slates, axis=1)
+    slate_scores = tf.gather(unnormalized_scores, self.slates, axis=1)
+    slate_normalizer = tf.reduce_sum(input_tensor=slate_scores, axis=-1) + 1.
+
+    # divide by (no_click_score + scores of items in slate)
+    slate_q_values = slate_q_values / tf.expand_dims(slate_normalizer, axis=-1)
     slate_sum_q_values = tf.reduce_sum(input_tensor=slate_q_values, axis=-1)
 
     if batch_size and actions is None:

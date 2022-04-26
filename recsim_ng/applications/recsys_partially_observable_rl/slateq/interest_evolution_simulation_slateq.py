@@ -28,7 +28,7 @@ from recsim_ng.lib.tensorflow import runtime
 import tensorflow as tf
 
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
-
+import datetime
 
 Network = network_lib.Network
 Variable = variable.Variable
@@ -38,7 +38,7 @@ tf.config.run_functions_eagerly(True) # for debugging
 
 def reset_replay_buffer(history_length, global_batch, batch_size=1, max_length=1000000):
   data_spec =  (
-          tf.TensorSpec([global_batch, 1], tf.int32, 'action'),
+          tf.TensorSpec([global_batch], tf.int32, 'action'),
           (
               tf.TensorSpec([global_batch, history_length], tf.float32, 'ctime_history'),
               tf.TensorSpec([global_batch, history_length], tf.int32, 'docid_history')
@@ -100,19 +100,33 @@ def distributed_train_step(
   dataset = replay_buffer.as_dataset(sample_batch_size=train_info['batch_size'])
   iterator = iter(dataset)
   cum_reward = 0.0
+
+  import pdb; pdb.set_trace()
+  init_state = tf_runtime.execute(0)
+  ctime_history = init_state['recommender state'].get('ctime_history').get('state')
+  docid_history = init_state['recommender state'].get('doc_history').get('state')
+
   for i in range(episode_length):
-    last_state = tf_runtime.execute(0)
-    ctime_history = last_state['recommender state'].get('ctime_history').get('state')
-    docid_history = last_state['recommender state'].get('doc_history').get('state')
-    action = last_state['slate docs'].get('slate_ids')
     last_state = tf_runtime.execute(1)
+    action = last_state['user state'].get('interest').get('chosen_doc_ids')
+    ## TODO change action from slate_ids to document_rank
     train_info['timestep'] += 1
+    # for action
+    import pdb; pdb.set_trace()
+    ## TODO action도 달라져야 함 for dqn
+    choice = last_state['user response'].get('choice')
+    choice = last_state['recommender state'].get('doc_history').get('fbranch').get('state')[:,-1]
     last_metric_value = last_state['metrics state'].get(metric_to_optimize)
     cum_reward += last_metric_value
 
     next_ctime_history = last_state['recommender state'].get('ctime_history').get('state')
     next_docid_history = last_state['recommender state'].get('doc_history').get('state')
     values = (action, (ctime_history, docid_history), (next_ctime_history, next_docid_history), last_metric_value)
+
+    # next state is last state
+    ctime_history = next_ctime_history
+    docid_history = next_docid_history
+
     values_batched = tf.nest.map_structure(lambda t: tf.expand_dims(t, 0), values)
     replay_buffer.add_batch(values_batched)
 
@@ -121,14 +135,19 @@ def distributed_train_step(
         print(f"{train_info['timestep']}  start training")
         (b_action, (b_ctime_history, b_docid_history), \
           (b_next_ctime_history, b_next_docid_history), b_reward), unused_info = next(iterator)
-        target_qs = rec._target(b_next_docid_history, b_next_ctime_history, batch_size=train_info['batch_size'])
+        # stop gradient
+        target_qs = tf.stop_gradient(rec._target(b_next_docid_history, b_next_ctime_history, batch_size=train_info['batch_size']))
         max_q = tf.math.reduce_max(target_qs, axis=-1, keepdims=True)
         target = tf.reshape(b_reward, (train_info['batch_size'], global_batch, -1)) + train_info['gamma'] * max_q
+        ## TODO use qs of selected
+        import pdb; pdb.set_trace()
         qs = tf.reshape(rec._model(b_docid_history, b_ctime_history, batch_size=train_info['batch_size'], actions=b_action), (train_info['batch_size'], global_batch, 1))
         loss = tf.reduce_mean(tf.square(qs-target))
 
       grads = tape.gradient(loss, rec._model.trainable_variables)
       optimizer.apply_gradients(zip(grads, rec._model.trainable_variables))
+
+      train_info['train_loss'](loss)
 
     if train_info['timestep'] % train_info['target_update_period'] == 0:
       update_target_network(rec._model, rec._target, 1.0)
@@ -186,6 +205,10 @@ def run_simulation(
   optimizer = reset_optimizer(learning_rate)
   replay_buffer = reset_replay_buffer(train_info['history_length'], global_batch)
   tf_runtime = make_runtime(simulation_variables)
+
+  train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
+  train_info['train_loss'] = train_loss
+
   train_step = make_train_step(tf_runtime, horizon, global_batch,
                                trainable_variables, metric_to_optimize,
                                optimizer, rec, replay_buffer, train_info)
@@ -193,8 +216,14 @@ def run_simulation(
   # initial transfer model weights to target model network
   update_target_network(rec._model, rec._target, 1.0)
 
+  # for logging
+  current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+  log_dir = 'log_dir/slateq/' + current_time
+  summary_writer = tf.summary.create_file_writer(log_dir)
 
-  for _ in range(num_training_steps):
+  for step in range(num_training_steps):
     _, _, reward = train_step()
+    with summary_writer.as_default():
+      tf.summary.scalar('loss', train_loss.result(), step=step)
+      tf.summary.scalar('reward', reward, step=step)
     print(reward)
-

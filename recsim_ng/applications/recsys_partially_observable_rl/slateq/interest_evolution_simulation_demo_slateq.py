@@ -22,7 +22,7 @@ import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-os.environ["CUDA_VISIBLE_DEVICES"]="2"
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 
 def main(argv):
@@ -35,7 +35,7 @@ def main(argv):
   train_info['batch_size'] = 32
   train_info['update_period'] = 4 #4
   train_info['target_update_period'] = 200 #4000
-  train_info['start_update'] = 1000 #1000
+  train_info['start_update'] = 2 #1000
   train_info['history_length'] = 15
 
   (variables, rec), trainable_variables = (

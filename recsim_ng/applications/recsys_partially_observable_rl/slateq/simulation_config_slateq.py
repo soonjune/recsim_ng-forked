@@ -22,7 +22,7 @@ import gin
 from recsim_ng.applications.recsys_partially_observable_rl import corpus
 from recsim_ng.applications.recsys_partially_observable_rl import metrics
 import recommender_slateq
-from recsim_ng.applications.recsys_partially_observable_rl import user
+import user_slateq as user
 from recsim_ng.core import variable
 from recsim_ng.lib.tensorflow import entity
 import recommendation_simulation as simulation
