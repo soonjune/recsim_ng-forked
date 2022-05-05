@@ -98,13 +98,13 @@ def distributed_train_step(
   dataset = replay_buffer.as_dataset(sample_batch_size=train_info['batch_size'])
   iterator = iter(dataset)
   cum_reward = 0.0
-  state = None
+
+  state = tf_runtime.execute(0)
+  ctime_history = state['recommender state'].get('ctime_history').get('state')
+  docid_history = state['recommender state'].get('doc_history').get('state')
+
   for i in range(episode_length):
-    last_state = tf_runtime.execute(0, starting_value = state)
-    ctime_history = last_state['recommender state'].get('ctime_history').get('state')
-    docid_history = last_state['recommender state'].get('doc_history').get('state')
-    ## TODO slateq와 같이 선택되는 action sync 맞춰줄 필요 있음
-    action = last_state['slate docs'].get('slate_ids')
+    action = state['slate docs'].get('slate_ids')
     last_state = tf_runtime.execute(1,  starting_value = state)
     train_info['timestep'] += 1
     last_metric_value = last_state['metrics state'].get(metric_to_optimize)
@@ -112,12 +112,15 @@ def distributed_train_step(
 
     next_ctime_history = last_state['recommender state'].get('ctime_history').get('state')
     next_docid_history = last_state['recommender state'].get('doc_history').get('state')
-    # now next starting value is this last_state
-    state = last_state
 
     values = (action, (ctime_history, docid_history), (next_ctime_history, next_docid_history), last_metric_value)
     values_batched = tf.nest.map_structure(lambda t: tf.expand_dims(t, 0), values)
     replay_buffer.add_batch(values_batched)
+
+    # state to next state before transition
+    ctime_history = next_ctime_history
+    docid_history = next_docid_history
+    state = last_state
 
     if (train_info['timestep'] > train_info['start_update']) and (train_info['timestep'] % train_info['update_period'] == 0):
       with tf.GradientTape() as tape:
@@ -206,7 +209,7 @@ def run_simulation(
   
   # for logging
   current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-  log_dir = 'log_dir/dqn/' + current_time
+  log_dir = 'log_dir/dqn/' + current_time[:-4] + f"user{global_batch}docs{rec._num_docs}hor{train_info['history_length']}steps{num_training_steps}"
   summary_writer = tf.summary.create_file_writer(log_dir)
 
   for step in range(num_training_steps):

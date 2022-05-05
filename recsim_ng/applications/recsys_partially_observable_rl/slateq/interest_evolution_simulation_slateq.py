@@ -108,10 +108,10 @@ def distributed_train_step(
   for i in range(episode_length):
     last_state = tf_runtime.execute(1, starting_value = state)
     action = last_state['user state'].get('interest').get('chosen_doc_ids') # same as last_state['recommender state'].get('doc_history').get('fbranch').get('state')[:,-1]
-    ## TODO change action from slate_ids to document_rank
+    ## DONE change action from slate_ids to document_rank
     train_info['timestep'] += 1
     # for action
-    ## TODO action도 달라져야 함 for dqn
+    ## DONE action도 달라져야 함 for dqn
     last_metric_value = last_state['metrics state'].get(metric_to_optimize)
     cum_reward += last_metric_value
 
@@ -119,13 +119,13 @@ def distributed_train_step(
     next_docid_history = last_state['recommender state'].get('doc_history').get('state')
     values = (action, (ctime_history, docid_history), (next_ctime_history, next_docid_history), last_metric_value)
 
+    values_batched = tf.nest.map_structure(lambda t: tf.expand_dims(t, 0), values)
+    replay_buffer.add_batch(values_batched)
+
     # state to next state before transition
     ctime_history = next_ctime_history
     docid_history = next_docid_history
     state = last_state
-
-    values_batched = tf.nest.map_structure(lambda t: tf.expand_dims(t, 0), values)
-    replay_buffer.add_batch(values_batched)
 
     if (train_info['timestep'] > train_info['start_update']) and (train_info['timestep'] % train_info['update_period'] == 0):
       with tf.GradientTape() as tape:
@@ -154,10 +154,9 @@ def distributed_train_step(
         # stop gradient
         target_qs = tf.stop_gradient(rec._target(b_next_docid_history, b_next_ctime_history, batch_size=len(b_action)))
         max_q = tf.math.reduce_max(target_qs, axis=-1, keepdims=True)
-        target = tf.reshape(b_reward, (-1, 1)) + train_info['gamma'] * max_q
+        target = tf.squeeze(tf.reshape(b_reward, (-1, 1)) + train_info['gamma'] * max_q)
 
         ## TODO use qs of selected
-        import pdb; pdb.set_trace()
         qs = rec._model(b_docid_history, b_ctime_history, batch_size=len(b_action), actions=b_action)
         loss = tf.reduce_mean(tf.square(qs-target))
 
@@ -235,7 +234,7 @@ def run_simulation(
 
   # for logging
   current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-  log_dir = 'log_dir/slateq/' + current_time
+  log_dir = 'log_dir/slateq/' + current_time[:-4] + f"user{global_batch}hor{horizon}steps{num_training_steps}"
   summary_writer = tf.summary.create_file_writer(log_dir)
 
   for step in range(num_training_steps):
