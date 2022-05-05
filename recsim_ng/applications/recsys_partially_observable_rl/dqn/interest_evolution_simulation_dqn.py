@@ -98,18 +98,23 @@ def distributed_train_step(
   dataset = replay_buffer.as_dataset(sample_batch_size=train_info['batch_size'])
   iterator = iter(dataset)
   cum_reward = 0.0
+  state = None
   for i in range(episode_length):
-    last_state = tf_runtime.execute(0)
+    last_state = tf_runtime.execute(0, starting_value = state)
     ctime_history = last_state['recommender state'].get('ctime_history').get('state')
     docid_history = last_state['recommender state'].get('doc_history').get('state')
+    ## TODO slateq와 같이 선택되는 action sync 맞춰줄 필요 있음
     action = last_state['slate docs'].get('slate_ids')
-    last_state = tf_runtime.execute(1)
+    last_state = tf_runtime.execute(1,  starting_value = state)
     train_info['timestep'] += 1
     last_metric_value = last_state['metrics state'].get(metric_to_optimize)
     cum_reward += last_metric_value
 
     next_ctime_history = last_state['recommender state'].get('ctime_history').get('state')
     next_docid_history = last_state['recommender state'].get('doc_history').get('state')
+    # now next starting value is this last_state
+    state = last_state
+
     values = (action, (ctime_history, docid_history), (next_ctime_history, next_docid_history), last_metric_value)
     values_batched = tf.nest.map_structure(lambda t: tf.expand_dims(t, 0), values)
     replay_buffer.add_batch(values_batched)

@@ -121,7 +121,7 @@ class DQNModel(tf.keras.Model):
     # Flatten and run through network to encode history.
     if batch_size or actions:
       # reshape to compute all embeddings in batch (validated)
-      user_features = tf.reshape(user_features, (batch_size * self._num_users, self._history_length, -1))
+      user_features = tf.reshape(user_features, (batch_size, self._history_length, -1))
       user_embeddings = self._user_embeddings(user_features)
     #   user_embeddings = tf.reshape(user_embeddings, (batch_size, self._num_users, -1))
     else:
@@ -141,22 +141,32 @@ class DQNModel(tf.keras.Model):
     # all_scores = tf.pad(prob_scores, [[0,0], [0,1]], mode='CONSTANT') # no click has score 1
     # all_prob = tf.nn.softmax(all_scores, axis=1)
     
-    q_vals = []
     # calculate q values
     if batch_size or actions:
+        inputs = []
         for i in range(self._num_docs):
             doc = tf.expand_dims(doc_features[i], axis=0)
-            doc = tf.repeat(doc, [batch_size * self._num_users], axis=0)
+            doc = tf.repeat(doc, [batch_size], axis=0)
             x = tf.concat((user_embeddings, doc), axis=1)
-            q_vals.append(self._net(x)[0])
+            inputs.append(x)
+        qs = self._net(tf.stack(inputs, axis=1))[0]
+        qs = tf.squeeze(qs)
     else:
+        q_vals = []
         for i in range(self._num_docs):
             doc = tf.expand_dims(doc_features[i], axis=0)
             doc = tf.repeat(doc, [self._num_users], axis=0)
             x = tf.concat((user_embeddings, doc), axis=1)
             q_vals.append(self._net(x)[0])
+        qs = tf.squeeze(tf.stack(q_vals, axis=1))
 
-    qs = tf.squeeze(tf.stack(q_vals, axis=1))
+
+    if actions is not None:
+        import pdb; pdb.set_trace()
+        slate_sum_q_values = tf.reshape(slate_sum_q_values, (batch_size, self._num_users, -1))
+        slate_sum_q_values = tf.gather_nd(slate_sum_q_values, actions)
+
+
     slate_q_values = tf.gather(unnormalized_scores * qs, self.slates, axis=1)
     slate_scores = tf.gather(unnormalized_scores, self.slates, axis=1)
     slate_normalizer = tf.reduce_sum(input_tensor=slate_scores, axis=-1) + 1.
@@ -165,11 +175,6 @@ class DQNModel(tf.keras.Model):
     slate_q_values = slate_q_values / tf.expand_dims(slate_normalizer, axis=-1)
     slate_sum_q_values = tf.reduce_sum(input_tensor=slate_q_values, axis=-1)
 
-    if batch_size and actions is None:
-        slate_sum_q_values = tf.reshape(slate_sum_q_values, (batch_size, self._num_users, -1))
-    elif actions is not None:
-        slate_sum_q_values = tf.reshape(slate_sum_q_values, (batch_size, self._num_users, -1))
-        slate_sum_q_values = tf.gather_nd(slate_sum_q_values, actions, batch_dims=2)
 
 
     return slate_sum_q_values

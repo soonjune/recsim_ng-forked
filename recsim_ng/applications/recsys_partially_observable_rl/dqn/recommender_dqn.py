@@ -259,7 +259,6 @@ class FullSlateQRecommender(recommender.BaseRecommender):
 
     if np.random.rand() < epsilon:
         slate_indices = tf.expand_dims([np.random.randint(0, len(self._all_possible_slates)) for _ in range(ctime_history.shape[0])], axis=-1)
-        import pdb; pdb.set_trace()
     else:
         qvals = self._model(docid_history, ctime_history)
         slate_indices = tf.expand_dims(tf.math.argmax(qvals, axis=1, output_type=tf.dtypes.int32), axis=-1)

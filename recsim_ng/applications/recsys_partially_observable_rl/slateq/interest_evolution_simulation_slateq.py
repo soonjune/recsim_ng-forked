@@ -101,21 +101,17 @@ def distributed_train_step(
   iterator = iter(dataset)
   cum_reward = 0.0
 
-  import pdb; pdb.set_trace()
-  init_state = tf_runtime.execute(0)
-  ctime_history = init_state['recommender state'].get('ctime_history').get('state')
-  docid_history = init_state['recommender state'].get('doc_history').get('state')
+  state = tf_runtime.execute(0)
+  ctime_history = state['recommender state'].get('ctime_history').get('state')
+  docid_history = state['recommender state'].get('doc_history').get('state')
 
   for i in range(episode_length):
-    last_state = tf_runtime.execute(1)
-    action = last_state['user state'].get('interest').get('chosen_doc_ids')
+    last_state = tf_runtime.execute(1, starting_value = state)
+    action = last_state['user state'].get('interest').get('chosen_doc_ids') # same as last_state['recommender state'].get('doc_history').get('fbranch').get('state')[:,-1]
     ## TODO change action from slate_ids to document_rank
     train_info['timestep'] += 1
     # for action
-    import pdb; pdb.set_trace()
     ## TODO action도 달라져야 함 for dqn
-    choice = last_state['user response'].get('choice')
-    choice = last_state['recommender state'].get('doc_history').get('fbranch').get('state')[:,-1]
     last_metric_value = last_state['metrics state'].get(metric_to_optimize)
     cum_reward += last_metric_value
 
@@ -123,9 +119,10 @@ def distributed_train_step(
     next_docid_history = last_state['recommender state'].get('doc_history').get('state')
     values = (action, (ctime_history, docid_history), (next_ctime_history, next_docid_history), last_metric_value)
 
-    # next state is last state
+    # state to next state before transition
     ctime_history = next_ctime_history
     docid_history = next_docid_history
+    state = last_state
 
     values_batched = tf.nest.map_structure(lambda t: tf.expand_dims(t, 0), values)
     replay_buffer.add_batch(values_batched)
@@ -135,13 +132,33 @@ def distributed_train_step(
         print(f"{train_info['timestep']}  start training")
         (b_action, (b_ctime_history, b_docid_history), \
           (b_next_ctime_history, b_next_docid_history), b_reward), unused_info = next(iterator)
+
+        b_action = tf.reshape(b_action, (train_info['batch_size'] * global_batch))
+        b_ctime_history = tf.reshape(b_ctime_history, (train_info['batch_size'] * global_batch, -1))
+        b_docid_history = tf.reshape(b_docid_history, (train_info['batch_size'] * global_batch, -1))
+        b_next_ctime_history = tf.reshape(b_next_ctime_history, (train_info['batch_size'] * global_batch, -1))
+        b_next_docid_history = tf.reshape(b_next_docid_history, (train_info['batch_size'] * global_batch, -1))
+        b_reward = tf.reshape(b_reward, (train_info['batch_size'] * global_batch))
+
+
+        # drop unchosen actions and transform doc_id to index by subtracting 1
+        mask = (b_action != -1)
+        b_action = tf.boolean_mask(b_action, mask) - 1
+        b_ctime_history = tf.boolean_mask(b_ctime_history, mask)
+        b_docid_history = tf.boolean_mask(b_docid_history, mask)
+        b_next_ctime_history = tf.boolean_mask(b_next_ctime_history, mask)
+        b_next_docid_history = tf.boolean_mask(b_next_docid_history, mask)
+        b_reward = tf.boolean_mask(b_reward, mask)
+
+
         # stop gradient
-        target_qs = tf.stop_gradient(rec._target(b_next_docid_history, b_next_ctime_history, batch_size=train_info['batch_size']))
+        target_qs = tf.stop_gradient(rec._target(b_next_docid_history, b_next_ctime_history, batch_size=len(b_action)))
         max_q = tf.math.reduce_max(target_qs, axis=-1, keepdims=True)
-        target = tf.reshape(b_reward, (train_info['batch_size'], global_batch, -1)) + train_info['gamma'] * max_q
+        target = tf.reshape(b_reward, (-1, 1)) + train_info['gamma'] * max_q
+
         ## TODO use qs of selected
         import pdb; pdb.set_trace()
-        qs = tf.reshape(rec._model(b_docid_history, b_ctime_history, batch_size=train_info['batch_size'], actions=b_action), (train_info['batch_size'], global_batch, 1))
+        qs = rec._model(b_docid_history, b_ctime_history, batch_size=len(b_action), actions=b_action)
         loss = tf.reduce_mean(tf.square(qs-target))
 
       grads = tape.gradient(loss, rec._model.trainable_variables)
